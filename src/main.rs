@@ -1,10 +1,5 @@
-use axum::{
-    routing::{get, post, put},
-    http::StatusCode,
-    Json, Router,
-    debug_handler
-};
-use axum::extract::{Path, State};
+use axum::{routing::{get, post, put}, http::StatusCode, Json, Router, debug_handler, Form};
+use axum::extract::{Path, Query, State};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use axum::response::{IntoResponse, Response};
@@ -60,7 +55,7 @@ struct UserResponse {
 #[debug_handler]
 async fn create_user(Json(v_payload): Json<UserInput> ) -> Result<Json<UserResponse>, AppError> {
     if v_payload.username.trim().is_empty() {
-        return Err(AppError::BAD_REQUEST("Username cannot be empty".into()));
+        return Err(AppError::BadRequest("Username cannot be empty".into()));
     }
 
     Ok(Json(UserResponse {
@@ -80,12 +75,31 @@ async fn increase(State(counter): State<Arc<Mutex<u32>>>) -> String {
     format!("Count bertambah: {}", *count)
 }
 
-async fn reset_count(State(counter): State<Arc<Mutex<u32>>>) -> String {
-    let mut count = counter.lock().unwrap();
+async fn reset_count(State(counter): State<Arc<Mutex<u32>>>) -> Result<String, AppError> {
+    let mut count = counter.lock().map_err(|_| AppError::Internal("failed to lock counter".into()))?;
     *count = 0;
-    format!("Count sekarang: {}", *count)
+    Ok(format!("Count sekarang: {}", *count))
 }
 
+
+#[derive(Deserialize)]
+struct SearchParam {
+    term: String,
+    page: Option<u32>,
+}
+
+async fn search(Query(param): Query<SearchParam>) -> String {
+    format!("Search: {}, page: {:?}", param.term, param.page)
+}
+
+#[derive(Deserialize)]
+struct LoginForm{
+    username: String,
+    password: String,
+}
+async fn login(Form(user): Form<LoginForm>) -> String {
+    format!("Login.... user: {}, password: {}", user.username, user.password)
+}
 
 #[tokio::main]
 async fn main() {
@@ -100,6 +114,8 @@ async fn main() {
         .route("/count", get(show_count))
         .route("/count/increase", get(increase))
         .route("/count/reset", put(reset_count))
+        .route("/search", get(search))
+        .route("/login", post(login))
         .with_state(counter);
 
     println!("Server berjalan di http://localhost:3000");
