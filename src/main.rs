@@ -1,8 +1,12 @@
-use axum::{routing::{get, post, put}, http::StatusCode, Json, Router, debug_handler, Form};
-use axum::extract::{Path, Query, State};
+use axum::{
+    routing::{get, post, put},
+    extract::{Path, Query, State, Extension},
+    response::{IntoResponse, Response},
+    http::StatusCode,
+    Json, Router,
+    debug_handler, Form};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
-use axum::response::{IntoResponse, Response};
 use serde_json::json;
 
 enum AppError {
@@ -97,12 +101,25 @@ struct LoginForm{
     username: String,
     password: String,
 }
-async fn login(Form(user): Form<LoginForm>) -> String {
-    format!("Login.... user: {}, password: {}", user.username, user.password)
+async fn login(Json(user): Json<LoginForm>) -> String {
+    format!("Login.... \nuser: {}, \npassword: {}", user.username, user.password)
+}
+
+#[derive(Clone)]
+struct AppState {
+    app_name: String,
+}
+
+async fn handler(Extension(state): Extension<Arc<Mutex<AppState>>>) -> String {
+    format!("Hello from, {}!", state.lock().unwrap().app_name)
 }
 
 #[tokio::main]
 async fn main() {
+    let state = Arc::new(Mutex::new(AppState {
+        app_name: "Axum Project".into(),
+    }));
+
     let counter = Arc::new(Mutex::new(0u32));
 
     let app = Router::new()
@@ -116,9 +133,11 @@ async fn main() {
         .route("/count/reset", put(reset_count))
         .route("/search", get(search))
         .route("/login", post(login))
+        .route("/extension", get(handler))
+        .layer(Extension(state))
         .with_state(counter);
 
-    println!("Server berjalan di http://localhost:3000");
+    println!("Server running at http://localhost:3000");
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
