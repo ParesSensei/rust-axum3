@@ -1,4 +1,3 @@
-use std::fmt::format;
 use axum::{
     routing::{get, post, put},
     extract::{Path, Query, State, Extension},
@@ -65,26 +64,26 @@ async fn create_user(Json(v_payload): Json<UserInput> ) -> Result<Json<UserRespo
     }
 
     Ok(Json(UserResponse {
-        message: format!("User {} berhasil dibuat", v_payload.username),
+        message: format!("User {} success created", v_payload.username),
     }))
 
 }
 
 async fn show_count(State(counter): State<Arc<Mutex<u32>>>) -> String {
     let count = *counter.lock().unwrap();
-    format!("Count sekarang: {}", count)
+    format!("Count now: {}", count)
 }
 
 async fn increase(State(counter): State<Arc<Mutex<u32>>>) -> String {
     let mut count = counter.lock().unwrap();
     *count += 1;
-    format!("Count bertambah: {}", *count)
+    format!("Count increase: {}", *count)
 }
 
 async fn reset_count(State(counter): State<Arc<Mutex<u32>>>) -> Result<String, AppError> {
     let mut count = counter.lock().map_err(|_| AppError::Internal("failed to lock counter".into()))?;
     *count = 0;
-    Ok(format!("Count sekarang: {}", *count))
+    Ok(format!("Count now: {}", *count))
 }
 
 
@@ -121,7 +120,11 @@ async fn user_agent(TypedHeader(user_agent): TypedHeader<UserAgent>) -> String {
 }
 
 async fn auth_header(TypedHeader(auth): TypedHeader<Authorization<Bearer>>) -> String {
-    format!("Ypur Bearer token: {}", auth.token())
+    format!("Your Bearer token: {}", auth.token())
+}
+
+async fn user_book(Path((id, name, year, subject)): Path<(u32, String, u32, String)>) -> String {
+    format!("User id: {}, \nname: {}, \nyear: {}, \nsubject: {}", id, name, year, subject)
 }
 
 #[tokio::main]
@@ -146,6 +149,7 @@ async fn main() {
         .route("/extension", get(handler))
         .route("/ua", get(user_agent))
         .route("/auth", get(auth_header))
+        .route("/path/{id}/{name}/{year}/{subject}", get(user_book))
         .layer(Extension(state))
         .with_state(counter);
 
