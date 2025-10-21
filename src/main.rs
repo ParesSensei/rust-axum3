@@ -1,10 +1,12 @@
+use std::fmt::format;
 use axum::{
     routing::{get, post, put},
     extract::{Path, Query, State, Extension},
     response::{IntoResponse, Response},
     http::StatusCode,
-    Json, Router,
-    debug_handler, Form};
+    Json, Router, debug_handler, Form};
+use axum_extra::TypedHeader;
+use headers::{UserAgent, Authorization, authorization::Bearer};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use serde_json::json;
@@ -114,6 +116,14 @@ async fn handler(Extension(state): Extension<Arc<Mutex<AppState>>>) -> String {
     format!("Hello from, {}!", state.lock().unwrap().app_name)
 }
 
+async fn user_agent(TypedHeader(user_agent): TypedHeader<UserAgent>) -> String {
+    format!("your User-agent: {}", user_agent)
+}
+
+async fn auth_header(TypedHeader(auth): TypedHeader<Authorization<Bearer>>) -> String {
+    format!("Ypur Bearer token: {}", auth.token())
+}
+
 #[tokio::main]
 async fn main() {
     let state = Arc::new(Mutex::new(AppState {
@@ -134,6 +144,8 @@ async fn main() {
         .route("/search", get(search))
         .route("/login", post(login))
         .route("/extension", get(handler))
+        .route("/ua", get(user_agent))
+        .route("/auth", get(auth_header))
         .layer(Extension(state))
         .with_state(counter);
 
