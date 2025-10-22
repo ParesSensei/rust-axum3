@@ -3,12 +3,15 @@ use axum::{
     extract::{Path, Query, State, Extension},
     response::{IntoResponse, Response},
     http::StatusCode,
-    Json, Router, debug_handler, Form};
+    Json, Router, debug_handler};
 use axum_extra::TypedHeader;
 use headers::{UserAgent, Authorization, authorization::Bearer};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    net::{SocketAddr}};
 use serde_json::json;
+use sqlx::{SqlitePool, FromRow};
 
 enum AppError {
     BadRequest(String),
@@ -69,19 +72,19 @@ async fn create_user(Json(v_payload): Json<UserInput> ) -> Result<Json<UserRespo
 
 }
 
-async fn show_count(State(counter): State<Arc<Mutex<u32>>>) -> String {
-    let count = *counter.lock().unwrap();
+async fn show_count(State(state): State<AppState>) -> String {
+    let count = *state.counter.lock().unwrap();
     format!("Count now: {}", count)
 }
 
-async fn increase(State(counter): State<Arc<Mutex<u32>>>) -> String {
-    let mut count = counter.lock().unwrap();
+async fn increase(State(state): State<AppState>) -> String {
+    let mut count = state.counter.lock().unwrap();
     *count += 1;
     format!("Count increase: {}", *count)
 }
 
-async fn reset_count(State(counter): State<Arc<Mutex<u32>>>) -> Result<String, AppError> {
-    let mut count = counter.lock().map_err(|_| AppError::Internal("failed to lock counter".into()))?;
+async fn reset_count(State(state): State<AppState>) -> Result<String, AppError> {
+    let mut count = state.counter.lock().map_err(|_| AppError::Internal("failed to lock counter".into()))?;
     *count = 0;
     Ok(format!("Count now: {}", *count))
 }
@@ -106,10 +109,6 @@ async fn login(Json(user): Json<LoginForm>) -> String {
     format!("Login.... \nuser: {}, \npassword: {}", user.username, user.password)
 }
 
-#[derive(Clone)]
-struct AppState {
-    app_name: String,
-}
 
 async fn handler(Extension(state): Extension<Arc<Mutex<AppState>>>) -> String {
     format!("Hello from, {}!", state.lock().unwrap().app_name)
@@ -127,13 +126,46 @@ async fn user_book(Path((id, name, year, subject)): Path<(u32, String, u32, Stri
     format!("User id: {}, \nname: {}, \nyear: {}, \nsubject: {}", id, name, year, subject)
 }
 
+//------------------- Database -----------------//
+
+// #[derive(Serialize, FromRow)]
+// struct AppStateDb{
+//     db_pool: SqlitePool,
+// }
+#[derive(Clone)]
+struct AppState {
+    app_name: String,
+    counter: Arc<Mutex<u32>>,
+    db_pool: SqlitePool,
+}
+
+#[derive(Clone, FromRow, Serialize)]
+struct User{
+    id: u32,
+    name: String,
+}
+
+async fn get_user(State(state): State<AppState>, Path(user_id): Path<u32>) -> Json<User> {
+    let user = sqlx::query_as::<_, User>("SELECT id, name FROM users WHERE id = ?")
+        .bind(user_id)
+        .fetch_one(&state.db_pool)
+        .await
+        .unwrap();
+
+    Json(user)
+}
+
 #[tokio::main]
 async fn main() {
-    let state = Arc::new(Mutex::new(AppState {
-        app_name: "Axum Project".into(),
-    }));
+    let pool = SqlitePool::connect("sqlite://users.db")
+        .await
+        .expect("Failed to create Sqlite database pool");
 
-    let counter = Arc::new(Mutex::new(0u32));
+    let state = AppState {
+        app_name: "Axum Project".into(),
+        counter: Arc::new(Mutex::new(0)),
+        db_pool: pool,
+    };
 
     let app = Router::new()
         .route("/", get(|| async { "Halo, dunia!" }))
@@ -150,8 +182,8 @@ async fn main() {
         .route("/ua", get(user_agent))
         .route("/auth", get(auth_header))
         .route("/path/{id}/{name}/{year}/{subject}", get(user_book))
-        .layer(Extension(state))
-        .with_state(counter);
+        .route("/db/user/{id}", get(get_user))
+        .with_state(state);
 
     println!("Server running at http://localhost:3000");
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
